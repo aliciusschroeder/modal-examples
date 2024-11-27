@@ -14,6 +14,8 @@
 import time
 from io import BytesIO
 from pathlib import Path
+import os
+
 
 import modal
 
@@ -35,7 +37,7 @@ cuda_dev_image = modal.Image.from_registry(
 
 # PyTorch added [faster attention kernels for Hopper GPUs in version 2.5
 
-diffusers_commit_sha = "81cf3b2f155f1de322079af28f625349ee21ec6b"
+diffusers_commit_sha = "8d477daed507801a50dc9f285c982b1c8051ae2d"
 
 flux_image = (
     cuda_dev_image.apt_install(
@@ -48,15 +50,15 @@ flux_image = (
         "libgl1",
     )
     .pip_install(
-        "invisible_watermark==0.2.0",
-        "transformers==4.44.0",
-        "huggingface_hub[hf_transfer]==0.26.2",
-        "accelerate==0.33.0",
-        "safetensors==0.4.4",
-        "sentencepiece==0.2.0",
-        "torch==2.5.0",
+        "invisible_watermark",
+        "transformers",
+        "huggingface_hub[hf_transfer]",
+        "accelerate",
+        "safetensors",
+        "sentencepiece",
+        "torch",
         f"git+https://github.com/huggingface/diffusers.git@{diffusers_commit_sha}",
-        "numpy<2",
+        "numpy",
     )
     .env({"HF_HUB_ENABLE_HF_TRANSFER": "1"})
 )
@@ -73,11 +75,12 @@ flux_image = flux_image.env(
 # set its default image to the one we just constructed,
 # and import `FluxPipeline` for downloading and running Flux.1.
 
-app = modal.App("example-flux", image=flux_image)
+app = modal.App("example-flux", image=flux_image, secrets=[modal.Secret.from_name("huggingface-secret")])
 
 with flux_image.imports():
     import torch
-    from diffusers import FluxPipeline
+    from diffusers import FluxFillPipeline
+    from diffusers.utils import load_image
 
 # ## Defining a parameterized `Model` inference class
 
@@ -90,7 +93,7 @@ with flux_image.imports():
 # 3. We run the actual inference in methods decorated with `@method`.
 
 MINUTES = 60  # seconds
-VARIANT = "schnell"  # or "dev", but note [dev] requires you to accept terms and conditions on HF
+VARIANT = "Fill-dev"  # or "dev", but note [dev] requires you to accept terms and conditions on HF
 NUM_INFERENCE_STEPS = 4  # use ~50 for [dev], smaller for [schnell]
 
 
@@ -117,12 +120,13 @@ class Model:
         from huggingface_hub import snapshot_download
         from transformers.utils import move_cache
 
-        snapshot_download(f"black-forest-labs/FLUX.1-{VARIANT}")
+        snapshot_download(f"black-forest-labs/FLUX.1-{VARIANT}", use_auth_token=os.environ["HF_TOKEN"])
 
         move_cache()
 
-        pipe = FluxPipeline.from_pretrained(
-            f"black-forest-labs/FLUX.1-{VARIANT}", torch_dtype=torch.bfloat16
+        pipe = FluxFillPipeline.from_pretrained(
+            f"black-forest-labs/FLUX.1-{VARIANT}", 
+            torch_dtype=torch.bfloat16,
         )
 
         return pipe
@@ -139,11 +143,18 @@ class Model:
 
     @modal.method()
     def inference(self, prompt: str) -> bytes:
+        image = load_image("https://huggingface.co/datasets/alecccdd/wmr/resolve/main/src/00001.jpg")
+        mask = load_image("https://huggingface.co/datasets/alecccdd/wmr/resolve/main/mask/00001.png")
+
         print("🎨 generating image...")
         out = self.pipe(
-            prompt,
-            output_type="pil",
-            num_inference_steps=NUM_INFERENCE_STEPS,
+            prompt="a woman",
+            image=image,
+            mask_image=mask,
+            height=853,
+            width=640,
+            max_sequence_length=512,
+            generator=torch.Generator("cpu").manual_seed(0)
         ).images[0]
 
         byte_stream = BytesIO()
@@ -179,18 +190,20 @@ def main(
     compile: bool = False,
 ):
     t0 = time.time()
-    image_bytes = Model(compile=compile).inference.remote(prompt)
+    image_bytes1 = Model(compile=compile).inference.remote(prompt)
     print(f"🎨 first inference latency: {time.time() - t0:.2f} seconds")
 
     if twice:
         t0 = time.time()
-        image_bytes = Model(compile=compile).inference.remote(prompt)
+        image_bytes2 = Model(compile=compile).inference.remote(prompt)
         print(f"🎨 second inference latency: {time.time() - t0:.2f} seconds")
 
-    output_path = Path("/tmp") / "flux" / "output.jpg"
-    output_path.parent.mkdir(exist_ok=True, parents=True)
-    print(f"🎨 saving output to {output_path}")
-    output_path.write_bytes(image_bytes)
+    output_path1 = Path("/tmp") / "flux" / "output1.jpg"
+    output_path2 = Path("/tmp") / "flux" / "output2.jpg"
+    output_path1.parent.mkdir(exist_ok=True, parents=True)
+    print(f"🎨 saving outputs to {output_path1}")
+    output_path1.write_bytes(image_bytes1)
+    output_path2.write_bytes(image_bytes2)
 
 
 # ## Speeding up Flux with `torch.compile`
