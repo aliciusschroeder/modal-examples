@@ -157,7 +157,7 @@ class Model:
             height=height,
             width=width,
             max_sequence_length=512,
-            # num_inference_steps=steps,
+            num_inference_steps=steps,
             generator=torch.Generator("cpu").manual_seed(0)
         ).images[0]
 
@@ -194,35 +194,27 @@ def main(
     print("url: ", url, "is currently ignored! change later :)")
     url1 = "https://huggingface.co/datasets/alecccdd/wmr/resolve/main/src/00001.jpg"
     url2 = "https://static1.mileroticos.com/photos/d/2024/08/31/62/b1779b73b28afef8e81b8db259677c28.jpg"
-
-    print("🎨 Beginning Flux inference...")
-    t0 = time.time()
-    image_bytes1 = Model(compile=compile).inference.remote(url1, steps=5)
-    print(f"🎨 first inference latency (5 steps, url 1): {time.time() - t0:.2f} seconds")
-
-    if twice:
-        t0 = time.time()
-        image_bytes2 = Model(compile=compile).inference.remote(url1, steps=25)
-        print(f"🎨 second inference latency (25 steps, url 1): {time.time() - t0:.2f} seconds")
-    
-    t0 = time.time()
-    image_bytes3 = Model(compile=compile).inference.remote(url1, steps=50)
-    print(f"🎨 third inference latency (50 steps, url 1): {time.time() - t0:.2f} seconds")
-
-    t0 = time.time()
-    image_bytes4 = Model(compile=compile).inference.remote(url2, steps=25)
-    print(f"🎨 fourth inference latency (25 steps, url 2): {time.time() - t0:.2f} seconds")
-
-    output_path1 = Path("/tmp") / "flux" / "url1-5steps.jpg"
-    output_path2 = Path("/tmp") / "flux" / "url1-25steps.jpg"
-    output_path3 = Path("/tmp") / "flux" / "url1-50steps.jpg"
-    output_path4 = Path("/tmp") / "flux" / "url2-25steps.jpg"
+    output_path1 = Path("/tmp") / "flux" / "url2-1steps.jpg"
     output_path1.parent.mkdir(exist_ok=True, parents=True)
-    print(f"🎨 saving outputs to {output_path1}")
-    output_path1.write_bytes(image_bytes1)
-    output_path2.write_bytes(image_bytes2)
-    output_path3.write_bytes(image_bytes3)
-    output_path4.write_bytes(image_bytes4)
+
+    def durchlauf(steps):
+        print("🎨 Beginning Flux inference...")
+        t0 = time.time()
+        image_bytes = Model(compile=compile).inference.remote(url2, steps=steps)
+        print(f"🎨 Inference latency ({steps} step(s), url 2): {time.time() - t0:.2f} seconds")
+        print(f"🎨 saving outputs to {output_path1}")
+        output_path = Path("/tmp") / "flux" / f"url2-{steps}steps.jpg"
+        output_path.write_bytes(image_bytes)
+
+    #if twice:
+        #t0 = time.time()
+        #image_bytes2 = Model(compile=compile).inference.remote(url2, steps=5)
+        #print(f"🎨 second inference latency (2 steps, url 2): {time.time() - t0:.2f} seconds")
+    
+    durchlauf(1)
+    durchlauf(5)
+    durchlauf(25)
+    durchlauf(40)
 
 
 # ## Speeding up Flux with `torch.compile`
