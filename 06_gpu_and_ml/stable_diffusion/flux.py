@@ -93,7 +93,7 @@ with flux_image.imports():
 # We do our model optimizations in this step. For details, see the section on `torch.compile` below.
 # 3. We run the actual inference in methods decorated with `@method`.
 
-MAX_HEIGHT = 1024
+MAX_HEIGHT = 2000
 MAX_WIDTH = 1024
 MINUTES = 60  # seconds
 VARIANT = "Fill-dev"  # or "dev", but note [dev] requires you to accept terms and conditions on HF
@@ -192,47 +192,54 @@ def main(
     compile: bool = False,
 ):
     print("url: ", url, "is currently ignored! change later :)")
-    url1 = "https://huggingface.co/datasets/alecccdd/wmr/resolve/main/src/00001.jpg"
-    url2 = "https://static1.mileroticos.com/photos/d/2024/05/23/79/cb8b845379c5083a966b5099c7bbab84.jpg"
-    output_path1 = Path("/tmp") / "flux" / "url2-1steps.jpg"
-    output_path1.parent.mkdir(exist_ok=True, parents=True)
 
-    stats = "Stats: \n1 step,5 steps,25 steps,40 steps,50 steps, resolution"
+    prompt = "a woman"
 
-    def durchlauf(steps, url_nr, stats=stats):
+    urls = [
+        "https://static1.mileroticos.com/photos/d/2024/09/24/19/51a44b617fa0df47c6f38672b955ac84.jpg",
+        "https://static1.mileroticos.com/photos/d/2024/09/24/1d/101fcbc751f3ceeb98cef9f950fecff5.jpg",
+        "https://static1.mileroticos.com/photos/d/2024/11/17/a6/032dc925386064065c363313d6c64d8b.jpg",
+        "https://static1.mileroticos.com/photos/d/2024/11/17/ab/627dbed451a088efa64905a2fb119b6d.jpg",
+        "https://static1.mileroticos.com/photos/d/2024/11/17/a7/b846e3e07f313c4d3a19a5570de3df60.jpg",
+        "https://static1.mileroticos.com/photos/d/2024/11/16/8d/2b5fe44ec8443e69dbd4fbd474b05879.jpg",
+        "https://static1.mileroticos.com/photos/d/2024/08/27/cd/2efe51c0c74d8940da8a0c021ff6f03d.jpg",
+        "https://static1.mileroticos.com/photos/d/2024/11/12/28/e2076649281406591bd51c40e162fa67.jpg"
+    ]
+    steps = [6,25]
+
+    def get_output_path(url_nr, steps):
+        return Path("/tmp") / "flux" / f"url{url_nr}-{steps}steps.jpg"
+
+    output_path = get_output_path(1, 1)
+    output_path.parent.mkdir(exist_ok=True, parents=True)
+
+    stats = f"Stats: \n{','.join(str(step) for step in steps)},resolution\n"
+
+    def durchlauf(url, steps, url_nr, stats, prompt=prompt):
         print("🎨 Beginning Flux inference...")
         t0 = time.time()
-        image_bytes = Model(compile=compile).inference.remote(url2, steps=steps)
-        print(f"🎨 Inference latency ({steps} step(s), url {url_nr}): {time.time() - t0:.2f} seconds")
-        output_path = Path("/tmp") / "flux" / f"url{url_nr}-{steps}steps.jpg"
+        image_bytes = Model(compile=compile).inference.remote(url, steps=steps)
+        run_time = f"{time.time() - t0:.2f}"
+        print(f"🎨 Inference latency ({steps} step(s), url {url_nr}): {run_time} seconds")
+        output_path = Path("/tmp") / "flux" / f"url{url_nr}-{steps}steps-nmw.jpg"
         print(f"🎨 saving outputs to {output_path}")
         output_path.write_bytes(image_bytes)
-        return stats + f"{time.time() - t0:.2f},"
-
-    #if twice:
-        #t0 = time.time()
-        #image_bytes2 = Model(compile=compile).inference.remote(url2, steps=5)
-        #print(f"🎨 second inference latency (2 steps, url 2): {time.time() - t0:.2f} seconds")
+        return stats + f"{run_time},"
     
     #TODO: clean up nach gestern. nach 25 steps wird es nicht mehr besser. Kosten, Deployment, handling, etc. planen
     # Und mehr feiern, was für einen geilen Erfolg wir heute hatten! :D
 
-    pnr = 11
-    
-    stats += durchlauf(1, pnr)
-    stats += durchlauf(5, pnr)
-    stats += durchlauf(25, pnr)
-    stats += durchlauf(40, pnr)
-    stats += durchlauf(50, pnr)
+    current_pnr = 22
+    new_pnr = current_pnr + 1
 
-    url2 = "https://static1.mileroticos.com/photos/d/2024/05/03/f0/0ce4e4fe263e7d7c37f66381285f25b8.jpg"
-    pnr = pnr + 1
-    stats += "\n"
-    stats += durchlauf(1, pnr)
-    stats += durchlauf(5, pnr)
-    stats += durchlauf(25, pnr)
-    stats += durchlauf(40, pnr)
-    stats += durchlauf(50, pnr)
+    def run(url, pnr, stats):
+        for step_nr in steps:
+            stats = durchlauf(url, step_nr, pnr, stats)
+        return stats + f"\n"
+    
+    for url_nr, url in enumerate(urls):
+        stats = run(url, new_pnr + url_nr, stats)
+
     print(stats)
 
 # ## Speeding up Flux with `torch.compile`
