@@ -193,29 +193,47 @@ def main(
 ):
     print("url: ", url, "is currently ignored! change later :)")
     url1 = "https://huggingface.co/datasets/alecccdd/wmr/resolve/main/src/00001.jpg"
-    url2 = "https://static1.mileroticos.com/photos/d/2024/08/31/62/b1779b73b28afef8e81b8db259677c28.jpg"
+    url2 = "https://static1.mileroticos.com/photos/d/2024/05/23/79/cb8b845379c5083a966b5099c7bbab84.jpg"
     output_path1 = Path("/tmp") / "flux" / "url2-1steps.jpg"
     output_path1.parent.mkdir(exist_ok=True, parents=True)
 
-    def durchlauf(steps):
+    stats = "Stats: \n1 step,5 steps,25 steps,40 steps,50 steps, resolution"
+
+    def durchlauf(steps, url_nr, stats=stats):
         print("🎨 Beginning Flux inference...")
         t0 = time.time()
         image_bytes = Model(compile=compile).inference.remote(url2, steps=steps)
-        print(f"🎨 Inference latency ({steps} step(s), url 2): {time.time() - t0:.2f} seconds")
-        print(f"🎨 saving outputs to {output_path1}")
-        output_path = Path("/tmp") / "flux" / f"url2-{steps}steps.jpg"
+        print(f"🎨 Inference latency ({steps} step(s), url {url_nr}): {time.time() - t0:.2f} seconds")
+        output_path = Path("/tmp") / "flux" / f"url{url_nr}-{steps}steps.jpg"
+        print(f"🎨 saving outputs to {output_path}")
         output_path.write_bytes(image_bytes)
+        return stats + f"{time.time() - t0:.2f},"
 
     #if twice:
         #t0 = time.time()
         #image_bytes2 = Model(compile=compile).inference.remote(url2, steps=5)
         #print(f"🎨 second inference latency (2 steps, url 2): {time.time() - t0:.2f} seconds")
     
-    durchlauf(1)
-    durchlauf(5)
-    durchlauf(25)
-    durchlauf(40)
+    #TODO: clean up nach gestern. nach 25 steps wird es nicht mehr besser. Kosten, Deployment, handling, etc. planen
+    # Und mehr feiern, was für einen geilen Erfolg wir heute hatten! :D
 
+    pnr = 11
+    
+    stats += durchlauf(1, pnr)
+    stats += durchlauf(5, pnr)
+    stats += durchlauf(25, pnr)
+    stats += durchlauf(40, pnr)
+    stats += durchlauf(50, pnr)
+
+    url2 = "https://static1.mileroticos.com/photos/d/2024/05/03/f0/0ce4e4fe263e7d7c37f66381285f25b8.jpg"
+    pnr = pnr + 1
+    stats += "\n"
+    stats += durchlauf(1, pnr)
+    stats += durchlauf(5, pnr)
+    stats += durchlauf(25, pnr)
+    stats += durchlauf(40, pnr)
+    stats += durchlauf(50, pnr)
+    print(stats)
 
 # ## Speeding up Flux with `torch.compile`
 
@@ -280,7 +298,7 @@ def crop_center(image: Image.Image, width: int, height: int) -> Image.Image:
 def get_image_and_mask_and_size(url: str, meta_mask: Image.Image) -> tuple[Image.Image, Image.Image, int, int]:
   input = load_image(url)
   if input.size[0] > MAX_WIDTH or input.size[1] > MAX_HEIGHT:
-    input = crop_center(input, MAX_WIDTH, MAX_HEIGHT)
+    input = crop_center(input, min(input.size[0], MAX_WIDTH), min(input.size[1], MAX_HEIGHT))
   width = input.size[0]
   height = input.size[1]
   new_mask = crop_center(meta_mask, width, height)
