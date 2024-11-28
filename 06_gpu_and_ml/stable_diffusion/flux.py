@@ -15,7 +15,7 @@ import time
 from io import BytesIO
 from pathlib import Path
 import os
-
+from PIL import Image
 
 import modal
 
@@ -81,6 +81,7 @@ with flux_image.imports():
     import torch
     from diffusers import FluxFillPipeline
     from diffusers.utils import load_image
+    from PIL import Image
 
 # ## Defining a parameterized `Model` inference class
 
@@ -92,9 +93,10 @@ with flux_image.imports():
 # We do our model optimizations in this step. For details, see the section on `torch.compile` below.
 # 3. We run the actual inference in methods decorated with `@method`.
 
+MAX_HEIGHT = 1024
+MAX_WIDTH = 1024
 MINUTES = 60  # seconds
 VARIANT = "Fill-dev"  # or "dev", but note [dev] requires you to accept terms and conditions on HF
-NUM_INFERENCE_STEPS = 4  # use ~50 for [dev], smaller for [schnell]
 
 
 @app.cls(
@@ -140,20 +142,21 @@ class Model:
         pipe = self.setup_model()
         pipe.to("cuda")  # move model to GPU
         self.pipe = optimize(pipe, compile=bool(self.compile))
+        self.meta_mask = load_image("https://huggingface.co/datasets/alecccdd/wmr/resolve/main/better-meta-mask.png")
 
     @modal.method()
-    def inference(self, prompt: str) -> bytes:
-        image = load_image("https://huggingface.co/datasets/alecccdd/wmr/resolve/main/src/00001.jpg")
-        mask = load_image("https://huggingface.co/datasets/alecccdd/wmr/resolve/main/mask/00001.png")
+    def inference(self, url: str, steps: int = 25) -> bytes:
+        image, mask, width, height = get_image_and_mask_and_size(url, self.meta_mask)
 
         print("🎨 generating image...")
         out = self.pipe(
             prompt="a woman",
             image=image,
             mask_image=mask,
-            height=853,
-            width=640,
-            max_sequence_length=512,
+            height=height,
+            width=width,
+            max_sequence_length=73,
+            num_inference_steps=steps,
             generator=torch.Generator("cpu").manual_seed(0)
         ).images[0]
 
@@ -183,27 +186,42 @@ class Model:
 
 @app.local_entrypoint()
 def main(
-    prompt: str = "a computer screen showing ASCII terminal art of the"
-    " word 'Modal' in neon green. two programmers are pointing excitedly"
-    " at the screen.",
+    url: str = "https://huggingface.co/datasets/alecccdd/wmr/resolve/main/src/00001.jpg",
     twice: bool = True,
     compile: bool = False,
 ):
+    print("url: ", url, "is currently ignored! change later :)")
+    url1 = "https://huggingface.co/datasets/alecccdd/wmr/resolve/main/src/00001.jpg"
+    url2 = "https://static1.mileroticos.com/photos/d/2024/08/31/62/b1779b73b28afef8e81b8db259677c28.jpg"
+
+    print("🎨 Beginning Flux inference...")
     t0 = time.time()
-    image_bytes1 = Model(compile=compile).inference.remote(prompt)
-    print(f"🎨 first inference latency: {time.time() - t0:.2f} seconds")
+    image_bytes1 = Model(compile=compile).inference.remote(url1, steps=5)
+    print(f"🎨 first inference latency (5 steps, url 1): {time.time() - t0:.2f} seconds")
 
     if twice:
         t0 = time.time()
-        image_bytes2 = Model(compile=compile).inference.remote(prompt)
-        print(f"🎨 second inference latency: {time.time() - t0:.2f} seconds")
+        image_bytes2 = Model(compile=compile).inference.remote(url1, steps=25)
+        print(f"🎨 second inference latency (25 steps, url 1): {time.time() - t0:.2f} seconds")
+    
+    t0 = time.time()
+    image_bytes3 = Model(compile=compile).inference.remote(url2, steps=5)
+    print(f"🎨 third inference latency (5 steps, url 2): {time.time() - t0:.2f} seconds")
 
-    output_path1 = Path("/tmp") / "flux" / "output1.jpg"
-    output_path2 = Path("/tmp") / "flux" / "output2.jpg"
+    t0 = time.time()
+    image_bytes4 = Model(compile=compile).inference.remote(url2, steps=25)
+    print(f"🎨 fourth inference latency (25 steps, url 2): {time.time() - t0:.2f} seconds")
+
+    output_path1 = Path("/tmp") / "flux" / "url1-5steps.jpg"
+    output_path2 = Path("/tmp") / "flux" / "url1-25steps.jpg"
+    output_path3 = Path("/tmp") / "flux" / "url2-5steps.jpg"
+    output_path4 = Path("/tmp") / "flux" / "url2-25steps.jpg"
     output_path1.parent.mkdir(exist_ok=True, parents=True)
     print(f"🎨 saving outputs to {output_path1}")
     output_path1.write_bytes(image_bytes1)
     output_path2.write_bytes(image_bytes2)
+    output_path3.write_bytes(image_bytes3)
+    output_path4.write_bytes(image_bytes4)
 
 
 # ## Speeding up Flux with `torch.compile`
@@ -246,6 +264,34 @@ def main(
 # Each different choice for a `parameter` creates a [separate auto-scaling deployment](https://modal.com/docs/guide/parameterized-functions).
 # That means your client can use arbitrary logic to decide whether to hit a compiled or eager endpoint.
 
+def crop_center(image: Image.Image, width: int, height: int) -> Image.Image:
+    """
+    Crop the image to the specified width and height, keeping the center.
+
+    :param image: A PIL.Image.Image instance.
+    :param width: The width of the crop.
+    :param height: The height of the crop.
+    :return: A new PIL.Image.Image object with the cropped dimensions.
+    """
+    original_width, original_height = image.size
+
+    # Calculate the cropping box
+    left = (original_width - width) // 2
+    top = (original_height - height) // 2
+    right = left + width
+    bottom = top + height
+
+    # Perform the crop
+    return image.crop((left, top, right, bottom))
+
+def get_image_and_mask_and_size(url: str, meta_mask: Image.Image) -> tuple[Image.Image, Image.Image, int, int]:
+  input = load_image(url)
+  if input.size[0] > MAX_WIDTH or input.size[1] > MAX_HEIGHT:
+    input = crop_center(input, MAX_WIDTH, MAX_HEIGHT)
+  width = input.size[0]
+  height = input.size[1]
+  new_mask = crop_center(meta_mask, width, height)
+  return input, new_mask, width, height
 
 def optimize(pipe, compile=True):
     # fuse QKV projections in Transformer and VAE
@@ -278,11 +324,19 @@ def optimize(pipe, compile=True):
 
     # trigger torch compilation
     print("🔦 running torch compiliation (may take up to 20 minutes)...")
+    mask = load_image("https://huggingface.co/datasets/alecccdd/wmr/resolve/main/mask/00001.png")
+    mask = crop_center(mask, 16, 16)
 
+    #TODO: Find out if we need to use real-world data for compilation to have real-world benefits
     pipe(
-        "dummy prompt to trigger torch compilation",
-        output_type="pil",
-        num_inference_steps=NUM_INFERENCE_STEPS,  # use ~50 for [dev], smaller for [schnell]
+        prompt="nothing",
+        image=mask,
+        mask_image=mask,
+        height=16,
+        width=16,
+        max_sequence_length=73,
+        num_inference_steps=1,
+        generator=torch.Generator("cpu").manual_seed(0)
     ).images[0]
 
     print("🔦 finished torch compilation")
