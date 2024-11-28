@@ -142,7 +142,8 @@ class Model:
         pipe = self.setup_model()
         pipe.to("cuda")  # move model to GPU
         self.pipe = optimize(pipe, compile=bool(self.compile))
-        self.meta_mask = load_image("https://huggingface.co/datasets/alecccdd/wmr/resolve/main/better-meta-mask.png")
+        #self.meta_mask = load_image("https://huggingface.co/datasets/alecccdd/wmr/resolve/main/better-meta-mask.png")
+        self.meta_mask = load_image("https://huggingface.co/datasets/alecccdd/wmr/resolve/main/meta-mask.png")
 
     @modal.method()
     def inference(self, url: str, steps: int = 25) -> bytes:
@@ -205,8 +206,8 @@ def main(
         print(f"🎨 second inference latency (25 steps, url 1): {time.time() - t0:.2f} seconds")
     
     t0 = time.time()
-    image_bytes3 = Model(compile=compile).inference.remote(url2, steps=5)
-    print(f"🎨 third inference latency (5 steps, url 2): {time.time() - t0:.2f} seconds")
+    image_bytes3 = Model(compile=compile).inference.remote(url1, steps=50)
+    print(f"🎨 third inference latency (50 steps, url 1): {time.time() - t0:.2f} seconds")
 
     t0 = time.time()
     image_bytes4 = Model(compile=compile).inference.remote(url2, steps=25)
@@ -214,7 +215,7 @@ def main(
 
     output_path1 = Path("/tmp") / "flux" / "url1-5steps.jpg"
     output_path2 = Path("/tmp") / "flux" / "url1-25steps.jpg"
-    output_path3 = Path("/tmp") / "flux" / "url2-5steps.jpg"
+    output_path3 = Path("/tmp") / "flux" / "url1-50steps.jpg"
     output_path4 = Path("/tmp") / "flux" / "url2-25steps.jpg"
     output_path1.parent.mkdir(exist_ok=True, parents=True)
     print(f"🎨 saving outputs to {output_path1}")
