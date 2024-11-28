@@ -155,8 +155,8 @@ class Model:
             mask_image=mask,
             height=height,
             width=width,
-            max_sequence_length=73,
-            num_inference_steps=steps,
+            max_sequence_length=512,
+            # num_inference_steps=steps,
             generator=torch.Generator("cpu").manual_seed(0)
         ).images[0]
 
