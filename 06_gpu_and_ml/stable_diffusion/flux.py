@@ -1,7 +1,6 @@
 # ---
 # output-directory: "/tmp/flux"
 # args: ["--no-compile"]
-# tags: ["use-case-image-video-3d", "featured"]
 # ---
 
 # # Run Flux fast on H100s with `torch.compile`
@@ -89,8 +88,10 @@ with flux_image.imports():
 
 # 1. We run any setup that can be persisted to disk in methods decorated with `@build`.
 # In this example, that includes downloading the model weights.
+
 # 2. We run any additional setup, like moving the model to the GPU, in methods decorated with `@enter`.
 # We do our model optimizations in this step. For details, see the section on `torch.compile` below.
+
 # 3. We run the actual inference in methods decorated with `@method`.
 
 MAX_HEIGHT = 2000
